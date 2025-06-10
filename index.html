@@ -9,14 +9,52 @@
   <h1>Create a Google Sheet</h1>
   <button onclick="handleAuthClick()">Sign In & Create Sheet</button>
   <div id="output"></div>
+  <div id="expense-form" style="display: none;">
+    <h3>Add Expense</h3>
+    <form id="add-expense-form">
+      <label>Date: <input type="date" name="date" required></label><br>
+      <label>Name: <input type="text" name="name" required></label><br>
+  
+      <label>Category:
+        <select name="category" required>
+          <option value="insurance">Insurance</option>
+          <option value="school">School</option>
+          <option value="dorm">Dorm</option>
+          <option value="food">Food</option>
+          <option value="internet">Internet</option>
+          <option value="transportation">Transportation</option>
+          <option value="entertainment">Entertainment</option>
+          <option value="groceries">Groceries</option>
+          <option value="other">Other</option>
+        </select>
+      </label><br>
+  
+      <label>Currency:
+        <select name="currency" required>
+          <option value="CAD">CAD</option>
+          <option value="IDR">IDR</option>
+        </select>
+      </label><br>
+  
+      <label>Amount: <input type="number" name="amount" step="0.01" required></label><br>
+      <label>Note: <input type="text" name="note"></label><br>
+  
+      <button type="submit">Submit Expense</button>
+    </form>
+  </div>
+  
 
   <script>
     const CLIENT_ID = '1037687338882-efhp3h8f8fe6pkri1jh1nvavp0ja9hei.apps.googleusercontent.com'; // Paste your client ID
     const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/drive.file';
 
+    const currencies = ['IDR','USD']; //add more currencies here
+    const categories = ['Insurance','School','Dorm','Food','Internet','Transportation','Entertainment','Groceries','Others'];
+
     let tokenClient;
     let gapiInited = false;
     let gisInited = false;
+    let sheetID1;
 
     function gapiLoaded() {
       gapi.load('client', initializeGapiClient);
@@ -39,6 +77,57 @@
       gisInited = true;
     }
 
+
+    document.getElementById("add-expense-form").addEventListener("submit", async function(e) {
+      e.preventDefault();
+      const form = e.target;
+
+      const row = [
+        form.date.value,
+        form.name.value,
+        form.category.value,
+        form.currency.value,
+        parseFloat(form.amount.value), // Ensuring numeric value
+        form.note.value
+      ];
+
+      try {
+        const nextRow = await getNextEmptyRow(sheetID1); // Determine next available row
+        const range = `Sheet1!B${nextRow}:G${nextRow}`;  // Target B to G in that row
+
+        await gapi.client.sheets.spreadsheets.values.update({
+          spreadsheetId: sheetID1,
+          range: range,
+          valueInputOption: "USER_ENTERED",
+          resource: {
+            values: [row]
+          }
+        });
+
+        alert("✅ Expense added successfully!");
+        form.reset();
+      } catch (error) {
+        console.error("❌ Failed to add expense:", error);
+        alert("❌ Failed to add expense. Check the console for details.");
+      }
+    });
+
+
+
+    async function getNextEmptyRow(spreadsheetId) {
+      const response = await gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: spreadsheetId,
+        range: 'Sheet1!B3:B', // Check from row 3 downward
+      });
+
+      const rows = response.result.values || [];
+      return rows.length + 3; // Account for the starting row index (B3 → row 3)
+    }
+
+
+
+
+
     function handleAuthClick() {
       tokenClient.callback = async (resp) => {
         if (resp.error) throw resp;
@@ -54,7 +143,7 @@
         console.log("Sign in as: ", userInfo.email);
         
 
-
+      
 
 
         //FINDING FOLDER IN GOOGLE DRIVE
@@ -72,6 +161,8 @@
                   const sheet = sheets[0];
                   document.getElementById('output').innerHTML =
                     `✅ Sheet Found: <a href="${sheet.webViewLink}" target="_blank">${sheet.webViewLink}</a>`;
+                  document.getElementById('expense-form').style.display = 'block';
+                  sheetID1 = sheet.id;
                   break;
                   break;
                 }
@@ -170,11 +261,11 @@
       // Step 1: Write data
       await gapi.client.sheets.spreadsheets.values.update({
           spreadsheetId: spreadsheetId,
-          range: 'Sheet1!B2:F2',
+          range: 'Sheet1!B2:G2',
           valueInputOption: 'RAW',
           resource: {
           values: [
-              ['Date', 'Name', 'Category','Amount','Note']
+              ['Date', 'Name', 'Category','Currency','Amount','Note']
           ]
           }
       });
@@ -191,7 +282,7 @@
                   startRowIndex: 1,
                   endRowIndex: 2,
                   startColumnIndex: 1,
-                  endColumnIndex: 6
+                  endColumnIndex: 7
                 },
                 cell: {
                   userEnteredFormat: {
@@ -209,7 +300,7 @@
                 sheetId: 0, // your sheet ID
                 dimension: "COLUMNS",
                 startIndex: 1, // column A
-                endIndex: 6    // up to but not including column D
+                endIndex: 7   
                 },
                 properties: {
                 pixelSize: 200 // set width in pixels
@@ -224,7 +315,7 @@
                   startRowIndex: 1,
                   endRowIndex: 2,
                   startColumnIndex: 1,
-                  endColumnIndex: 6
+                  endColumnIndex: 7
                 },
                 top: {
                   style: "SOLID",
@@ -264,6 +355,8 @@
 
       document.getElementById('output').innerHTML =
           `✅ Sheet Created, Data Added & Formatted: <a href="${sheetUrl}" target="_blank">${sheetUrl}</a>`;
+      document.getElementById('expense-form').style.display = 'block';
+      sheetID1 = spreadsheetId;
     }
 
     async function createSheet() {
