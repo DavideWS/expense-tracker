@@ -42,6 +42,7 @@
       <button type="submit">Submit Expense</button>
     </form>
   </div>
+  <h1 id="expense-summary"></h1>
   
 
   <script>
@@ -106,6 +107,7 @@
 
         alert("✅ Expense added successfully!");
         form.reset();
+        await updateExpenseSummary();
       } catch (error) {
         console.error("❌ Failed to add expense:", error);
         alert("❌ Failed to add expense. Check the console for details.");
@@ -125,6 +127,35 @@
     }
 
 
+    async function updateExpenseSummary() {
+      const response = await gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: sheetID1,
+        range: "Sheet1!E3:F", 
+      });
+
+      const rows = response.result.values || [];
+      let totals = {
+        CAD: 0,
+        IDR: 0
+      };
+
+      for (const [currency, amount] of rows) {
+        const numericAmount = parseFloat(amount);
+        if (!isNaN(numericAmount)) {
+          if (currency === "CAD") {
+            totals.CAD += numericAmount;
+          } else if (currency === "IDR") {
+            totals.IDR += numericAmount;
+          }
+        }
+      }
+
+      document.getElementById("expense-summary").innerHTML = `
+        <strong>Total Expenses</strong><br>
+        CAD: $${totals.CAD.toLocaleString("en-US")}<br>
+        IDR: Rp ${totals.IDR.toLocaleString("en-US")}
+      `;
+    }
 
 
 
@@ -162,6 +193,7 @@
                   document.getElementById('output').innerHTML =
                     `✅ Sheet Found: <a href="${sheet.webViewLink}" target="_blank">${sheet.webViewLink}</a>`;
                   document.getElementById('expense-form').style.display = 'block';
+                  document.getElementById('expense-summary').style.display = 'block';
                   sheetID1 = sheet.id;
                   break;
                   break;
@@ -172,6 +204,7 @@
                 const createSheet = await createSheetInFolder(foundFolder[0].id);
               }
             }
+            updateExpenseSummary();
         }else{
             //Making new folder
             const newFolder = await createFolder();
@@ -356,6 +389,7 @@
       document.getElementById('output').innerHTML =
           `✅ Sheet Created, Data Added & Formatted: <a href="${sheetUrl}" target="_blank">${sheetUrl}</a>`;
       document.getElementById('expense-form').style.display = 'block';
+      document.getElementById('expense-summary').style.display = 'block';
       sheetID1 = spreadsheetId;
     }
 
