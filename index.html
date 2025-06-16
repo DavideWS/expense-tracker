@@ -16,24 +16,11 @@
       <label>Name: <input type="text" name="name" required></label><br>
   
       <label>Category:
-        <select name="category" required>
-          <option value="insurance">Insurance</option>
-          <option value="school">School</option>
-          <option value="dorm">Dorm</option>
-          <option value="food">Food</option>
-          <option value="internet">Internet</option>
-          <option value="transportation">Transportation</option>
-          <option value="entertainment">Entertainment</option>
-          <option value="groceries">Groceries</option>
-          <option value="other">Other</option>
-        </select>
+        <select id="category" name="category" required></select>
       </label><br>
   
       <label>Currency:
-        <select name="currency" required>
-          <option value="CAD">CAD</option>
-          <option value="IDR">IDR</option>
-        </select>
+        <select id="currency" name="currency" required></select>
       </label><br>
   
       <label>Amount: <input type="number" name="amount" step="0.01" required></label><br>
@@ -44,12 +31,14 @@
   </div>
   <h1 id="expense-summary"></h1>
   
+  
+
 
   <script>
     const CLIENT_ID = '1037687338882-efhp3h8f8fe6pkri1jh1nvavp0ja9hei.apps.googleusercontent.com'; // Paste your client ID
     const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/drive.file';
 
-    const currencies = ['IDR','USD']; //add more currencies here
+    const currencies = ['IDR','CAD']; //add more currencies here
     const categories = ['Insurance','School','Dorm','Food','Internet','Transportation','Entertainment','Groceries','Others'];
 
     let tokenClient;
@@ -114,7 +103,16 @@
       }
     });
 
-
+    function dropdownOptions(id, options) {
+      const select = document.getElementById(id);
+      select.innerHTML = "";
+      options.forEach(option => {
+        const opt = document.createElement("option");
+        opt.value = option;
+        opt.textContent = option;
+        select.appendChild(opt);
+      });
+    }
 
     async function getNextEmptyRow(spreadsheetId) {
       const response = await gapi.client.sheets.spreadsheets.values.get({
@@ -127,35 +125,56 @@
     }
 
 
-    async function updateExpenseSummary() {
+    async function updateExpenseSummary(selectedCategory = "All") {
       const response = await gapi.client.sheets.spreadsheets.values.get({
         spreadsheetId: sheetID1,
-        range: "Sheet1!E3:F", 
+        range: "Sheet1!D3:F",
       });
 
       const rows = response.result.values || [];
-      let totals = {
-        CAD: 0,
-        IDR: 0
-      };
+      let totals = {};
 
-      for (const [currency, amount] of rows) {
+      currencies.forEach(currency => {
+        totals[currency] = 0;
+      });
+
+      for (const row of rows) {
+        const [category, currency, amount] = row;
         const numericAmount = parseFloat(amount);
         if (!isNaN(numericAmount)) {
-          if (currency === "CAD") {
-            totals.CAD += numericAmount;
-          } else if (currency === "IDR") {
-            totals.IDR += numericAmount;
+          if (selectedCategory === "All" || category === selectedCategory) {
+            if (!totals[currency]) totals[currency] = 0;
+            totals[currency] += numericAmount;
           }
         }
       }
 
-      document.getElementById("expense-summary").innerHTML = `
+      let html = `
         <strong>Total Expenses</strong><br>
-        CAD: $${totals.CAD.toLocaleString("en-US")}<br>
-        IDR: Rp ${totals.IDR.toLocaleString("en-US")}
+        <label for="category-filter">Filter by Category:</label>
+        <select id="category-filter">
+          <option value="All">All</option>
+          ${categories.map(cat => `<option value="${cat}" ${cat === selectedCategory ? "selected" : ""}>${cat}</option>`).join("")}
+        </select>
+        <br><br>
       `;
+
+      for (const currency of currencies) {
+        const amount = totals[currency] || 0;
+        const formatted = currency === "IDR"
+          ? `Rp ${amount.toLocaleString("id-ID")}`
+          : `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+        html += `${currency}: ${formatted}<br>`;
+      }
+
+      document.getElementById("expense-summary").innerHTML = html;
+
+      document.getElementById("category-filter").addEventListener("change", function () {
+        updateExpenseSummary(this.value);
+      });
     }
+
+
 
 
 
@@ -228,21 +247,6 @@
         console.log('Sheet Not Found');
         return null;
       }
-    }
-
-    async function findFileByName(filename) {
-        const response = await gapi.client.drive.files.list({
-            q: `name = '${filename}' and trashed = false`,
-            fields: 'files(id, name, webViewLink)'
-        });
-
-        const files = response.result.files;
-        if (files && files.length > 0) {
-            return files[0]; // return the first match
-        } else {
-            console.log('No file found with name:', filename);
-            return null;
-        }
     }
 
     async function findFolderByName(foldername) {
@@ -393,94 +397,14 @@
       sheetID1 = spreadsheetId;
     }
 
-    async function createSheet() {
-        const createResponse = await gapi.client.sheets.spreadsheets.create({
-            properties: {
-            title: 'Expense Tracker Sheet'
-            }
-        });
-
-        const spreadsheetId = createResponse.result.spreadsheetId;
-        const sheetUrl = createResponse.result.spreadsheetUrl;
-
-        // Step 1: Write data
-        await gapi.client.sheets.spreadsheets.values.update({
-            spreadsheetId: spreadsheetId,
-            range: 'Sheet1!A1:C3',
-            valueInputOption: 'RAW',
-            resource: {
-            values: [
-                ['Name', 'Email', 'Amount'],
-                ['Alice', 'alice@example.com', '42'],
-                ['Budi' , 'budi@example.com', '30']
-            ]
-            }
-        });
-
-        // Step 2: Apply formatting (merge A1:C1, center text, light blue background)
-        await gapi.client.sheets.spreadsheets.batchUpdate({
-            spreadsheetId: spreadsheetId,
-            resource: {
-            requests: [
-                {
-                mergeCells: {
-                    range: {
-                    sheetId: 0, // Assumes "Sheet1"
-                    startRowIndex: 0,
-                    endRowIndex: 1,
-                    startColumnIndex: 0,
-                    endColumnIndex: 3
-                    },
-                    mergeType: "MERGE_ALL"
-                }
-                },
-                {
-                repeatCell: {
-                    range: {
-                    sheetId: 0,
-                    startRowIndex: 0,
-                    endRowIndex: 1,
-                    startColumnIndex: 0,
-                    endColumnIndex: 3
-                    },
-                    cell: {
-                    userEnteredFormat: {
-                        backgroundColor: { red: 0.8, green: 0.9, blue: 1.0 },
-                        horizontalAlignment: "CENTER",
-                        textFormat: { bold: true }
-                    }
-                    },
-                    fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)"
-                }
-                },
-                {
-                updateDimensionProperties: {
-                    range: {
-                    sheetId: 0, // your sheet ID
-                    dimension: "COLUMNS",
-                    startIndex: 0, // column A
-                    endIndex: 3    // up to but not including column D
-                    },
-                    properties: {
-                    pixelSize: 200 // set width in pixels
-                    },
-                    fields: "pixelSize"
-                }
-                }
-            ]
-            }
-        });
-
-        document.getElementById('output').innerHTML =
-            `✅ Sheet Created, Data Added & Formatted: <a href="${sheetUrl}" target="_blank">${sheetUrl}</a>`;
-    }
-
-
 
     window.onload = () => {
       gapiLoaded();
       gisLoaded();
+      dropdownOptions("category", categories);
+      dropdownOptions("currency", currencies);
     };
+
   </script>
 </body>
 </html>
