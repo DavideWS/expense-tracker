@@ -8,6 +8,7 @@
 <body>
   <h1>Create a Google Sheet</h1>
   <button onclick="handleAuthClick()">Sign In & Create Sheet</button>
+  <button onclick="logout()">Logout</button>
   <div id="output"></div>
   <div id="expense-form" style="display: none;">
     <h3>Add Expense</h3>
@@ -62,7 +63,7 @@
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
         scope: SCOPES,
-        callback: '', // we set this when requesting access
+        callback: '', 
       });
       gisInited = true;
     }
@@ -77,13 +78,13 @@
         form.name.value,
         form.category.value,
         form.currency.value,
-        parseFloat(form.amount.value), // Ensuring numeric value
+        parseFloat(form.amount.value), 
         form.note.value
       ];
 
       try {
-        const nextRow = await getNextEmptyRow(sheetID1); // Determine next available row
-        const range = `Sheet1!B${nextRow}:G${nextRow}`;  // Target B to G in that row
+        const nextRow = await getNextEmptyRow(sheetID1); 
+        const range = `Sheet1!B${nextRow}:G${nextRow}`;  
 
         await gapi.client.sheets.spreadsheets.values.update({
           spreadsheetId: sheetID1,
@@ -94,12 +95,12 @@
           }
         });
 
-        alert("✅ Expense added successfully!");
+        alert("Expense added successfully!");
         form.reset();
         await updateExpenseSummary();
       } catch (error) {
-        console.error("❌ Failed to add expense:", error);
-        alert("❌ Failed to add expense. Check the console for details.");
+        console.error("Failed to add expense:", error);
+        alert("Failed to add expense. Check the console for details.");
       }
     });
 
@@ -117,18 +118,18 @@
     async function getNextEmptyRow(spreadsheetId) {
       const response = await gapi.client.sheets.spreadsheets.values.get({
         spreadsheetId: spreadsheetId,
-        range: 'Sheet1!B3:B', // Check from row 3 downward
+        range: 'Sheet1!B3:B', 
       });
 
       const rows = response.result.values || [];
-      return rows.length + 3; // Account for the starting row index (B3 → row 3)
+      return rows.length + 3; 
     }
 
 
-    async function updateExpenseSummary(selectedCategory = "All") {
+    async function updateExpenseSummary(selectedCategory = "All", startDate = null, endDate = null) {
       const response = await gapi.client.sheets.spreadsheets.values.get({
         spreadsheetId: sheetID1,
-        range: "Sheet1!D3:F",
+        range: "Sheet1!B3:F", 
       });
 
       const rows = response.result.values || [];
@@ -138,43 +139,82 @@
         totals[currency] = 0;
       });
 
-      for (const row of rows) {
-        const [category, currency, amount] = row;
-        const numericAmount = parseFloat(amount);
-        if (!isNaN(numericAmount)) {
-          if (selectedCategory === "All" || category === selectedCategory) {
-            if (!totals[currency]) totals[currency] = 0;
-            totals[currency] += numericAmount;
-          }
-        }
-      }
+
+      const today = new Date();
+      const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+      startDate = startDate ? new Date(startDate) : firstOfMonth;
+      endDate = endDate ? new Date(endDate) : today;
+
+      const startDateStr = startDate.toLocaleDateString("en-CA"); 
+      const endDateStr = endDate.toISOString().split('T')[0];
 
       let html = `
         <strong>Total Expenses</strong><br>
+
         <label for="category-filter">Filter by Category:</label>
         <select id="category-filter">
           <option value="All">All</option>
           ${categories.map(cat => `<option value="${cat}" ${cat === selectedCategory ? "selected" : ""}>${cat}</option>`).join("")}
-        </select>
-        <br><br>
+        </select><br><br>
+
+        <label for="start-date">Start Date:</label>
+        <input type="date" id="start-date" value="${startDateStr}"><br>
+
+        <label for="end-date">End Date:</label>
+        <input type="date" id="end-date" value="${endDateStr}"><br><br>
       `;
 
+      for (const row of rows) {
+        const [dateStr, , category, currency, amount] = row; 
+        const date = new Date(dateStr);
+        const numericAmount = parseFloat(amount);
+
+        if (isNaN(date) || isNaN(numericAmount)) continue;
+
+        const inDateRange = date >= startDate && date <= endDate;
+        const categoryMatch = selectedCategory === "All" || category === selectedCategory;
+
+        if (inDateRange && categoryMatch) {
+          if (!totals[currency]) totals[currency] = 0;
+          totals[currency] += numericAmount;
+
+          if (!currencies.includes(currency)) {
+            currencies.push(currency);
+          }
+        }
+      }
+
       for (const currency of currencies) {
-        const amount = totals[currency] || 0;
-        const formatted = currency === "IDR"
-          ? `Rp ${amount.toLocaleString("id-ID")}`
-          : `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
-        html += `${currency}: ${formatted}<br>`;
+        const total = totals[currency] || 0;
+        html += `${currency}: ${total.toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        })}<br>`;
       }
 
       document.getElementById("expense-summary").innerHTML = html;
 
       document.getElementById("category-filter").addEventListener("change", function () {
-        updateExpenseSummary(this.value);
+        const newStart = document.getElementById("start-date").value;
+        const newEnd = document.getElementById("end-date").value;
+        updateExpenseSummary(this.value, newStart, newEnd);
       });
+
+      document.getElementById("start-date").addEventListener("change", function () {
+        const newCategory = document.getElementById("category-filter").value;
+        const newEnd = document.getElementById("end-date").value;
+        updateExpenseSummary(newCategory, this.value, newEnd);
+      });
+
+      document.getElementById("end-date").addEventListener("change", function () {
+        const newCategory = document.getElementById("category-filter").value;
+        const newStart = document.getElementById("start-date").value;
+        updateExpenseSummary(newCategory, newStart, this.value);
+      });
+
+      dropdownOptions("currency", currencies); 
     }
-
-
 
 
 
@@ -182,56 +222,54 @@
       tokenClient.callback = async (resp) => {
         if (resp.error) throw resp;
 
-        //GETTING USER EMAIL
-        const accessToken = gapi.client.getToken().access_token;
-        const userInfo = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-            headers: {
-                Authorization: `Bearer ${accessToken}`, // Pass access token in Authorization header
-            },
-        }).then(res => res.json());
+        // Save the token
+        localStorage.setItem("access_token", gapi.client.getToken().access_token);
 
-        console.log("Sign in as: ", userInfo.email);
-        
-
-      
-
-
-        //FINDING FOLDER IN GOOGLE DRIVE
-        await gapi.client.load('drive','v3');
-        const foundFolder = await findFolderByName('Expense Tracker');
-        if(foundFolder){
-            console.log('Found Folder:', foundFolder);
-            let sheetFound = false;
-            if (foundFolder.length > 0) {
-              for (const folder of foundFolder) {
-                const sheets = await findFileWithinFolder('Expense Tracker Sheet', folder.id);
-                if (sheets){
-                  console.log('Found Sheet:', sheets);
-                  sheetFound = true;
-                  const sheet = sheets[0];
-                  document.getElementById('output').innerHTML =
-                    `✅ Sheet Found: <a href="${sheet.webViewLink}" target="_blank">${sheet.webViewLink}</a>`;
-                  document.getElementById('expense-form').style.display = 'block';
-                  document.getElementById('expense-summary').style.display = 'block';
-                  sheetID1 = sheet.id;
-                  break;
-                  break;
-                }
-              }
-              if (!sheetFound){
-                console.log('Sheet Not Found');
-                const createSheet = await createSheetInFolder(foundFolder[0].id);
-              }
-            }
-            updateExpenseSummary();
-        }else{
-            //Making new folder
-            const newFolder = await createFolder();
-            const newSheet = await createSheetInFolder(newFolder.id);
-        }
+        await onUserSignedIn();
       };
       tokenClient.requestAccessToken({ prompt: 'consent' });
     }
+
+    async function onUserSignedIn() {
+      const accessToken = localStorage.getItem("access_token");
+
+      const userInfo = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }).then(res => res.json());
+
+      console.log("Signed in as:", userInfo.email);
+
+      await gapi.client.load('drive', 'v3');
+      const foundFolder = await findFolderByName('Expense Tracker');
+      if (foundFolder) {
+        console.log('Found Folder:', foundFolder);
+        let sheetFound = false;
+        for (const folder of foundFolder) {
+          const sheets = await findFileWithinFolder('Expense Tracker Sheet', folder.id);
+          if (sheets) {
+            console.log('Found Sheet:', sheets);
+            sheetFound = true;
+            const sheet = sheets[0];
+            document.getElementById('output').innerHTML =
+              `✅ Sheet Found: <a href="${sheet.webViewLink}" target="_blank">${sheet.webViewLink}</a>`;
+            document.getElementById('expense-form').style.display = 'block';
+            document.getElementById('expense-summary').style.display = 'block';
+            sheetID1 = sheet.id;
+            break;
+          }
+        }
+        if (!sheetFound) {
+          const createSheet = await createSheetInFolder(foundFolder[0].id);
+        }
+        updateExpenseSummary();
+      } else {
+        const newFolder = await createFolder();
+        const newSheet = await createSheetInFolder(newFolder.id);
+      }
+    }
+
 
     async function findFileWithinFolder(filename, folderID) {
       const response = await gapi.client.drive.files.list({
@@ -295,7 +333,6 @@
       const spreadsheetId = response.result.id;
       const sheetUrl = response.result.webViewLink;
 
-      // Step 1: Write data
       await gapi.client.sheets.spreadsheets.values.update({
           spreadsheetId: spreadsheetId,
           range: 'Sheet1!B2:G2',
@@ -307,7 +344,7 @@
           }
       });
 
-      // Step 2: Apply formatting (merge A1:C1, center text, light blue background)
+
       await gapi.client.sheets.spreadsheets.batchUpdate({
           spreadsheetId: spreadsheetId,
           resource: {
@@ -334,13 +371,13 @@
             {
             updateDimensionProperties: {
                 range: {
-                sheetId: 0, // your sheet ID
+                sheetId: 0,
                 dimension: "COLUMNS",
-                startIndex: 1, // column A
+                startIndex: 1, 
                 endIndex: 7   
                 },
                 properties: {
-                pixelSize: 200 // set width in pixels
+                pixelSize: 200 
                 },
                 fields: "pixelSize"
             }
@@ -398,12 +435,33 @@
     }
 
 
-    window.onload = () => {
+    window.onload = async () => {
       gapiLoaded();
       gisLoaded();
       dropdownOptions("category", categories);
       dropdownOptions("currency", currencies);
+
+      const interval = setInterval(() => {
+        if (gapiInited && gisInited) {
+          clearInterval(interval);
+
+          const savedToken = localStorage.getItem("access_token");
+          if (savedToken) {
+            console.log("Using saved token");
+            gapi.client.setToken({ access_token: savedToken });
+            onUserSignedIn();
+          } else {
+            console.log('Need to Sign In.');
+          }
+        }
+      }, 200);
     };
+
+    function logout() {
+      localStorage.removeItem("access_token");
+      location.reload();
+    }
+
 
   </script>
 </body>
