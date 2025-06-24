@@ -7,8 +7,8 @@
 </head>
 <body>
   <h1>Create a Google Sheet</h1>
-  <button onclick="handleAuthClick()">Sign In & Create Sheet</button>
-  <button onclick="logout()">Logout</button>
+  <button onclick="handleAuthClick()" id="sign-in">Sign In & Create Sheet</button>
+  <button onclick="logout()" style="display: none;" id="sign-out">Logout</button>
   <div id="output"></div>
   <div id="expense-form" style="display: none;">
     <h3>Add Expense</h3>
@@ -31,13 +31,25 @@
     </form>
   </div>
   <h1 id="expense-summary"></h1>
+
+  <div id="email-section" style="display: none;">
+    <label for="month-date">Pick a Date:</label>
+    <input type="date" id="month-date"><br>
+  
+    <label for="recipient-email">Recipient Email:</label>
+    <input type="email" id="recipient-email" placeholder="example@email.com" required><br>
+  
+    <button onclick="sendMonthlyReport()">Send Monthly Report</button>
+  </div>
+  
+
   
   
 
 
   <script>
     const CLIENT_ID = '1037687338882-efhp3h8f8fe6pkri1jh1nvavp0ja9hei.apps.googleusercontent.com'; // Paste your client ID
-    const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/drive.file';
+    const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send';
 
     const currencies = ['IDR','CAD']; //add more currencies here
     const categories = ['Insurance','School','Dorm','Food','Internet','Transportation','Entertainment','Groceries','Others'];
@@ -46,6 +58,7 @@
     let gapiInited = false;
     let gisInited = false;
     let sheetID1;
+    let userEmail = "";
 
     function gapiLoaded() {
       gapi.load('client', initializeGapiClient);
@@ -240,6 +253,7 @@
       }).then(res => res.json());
 
       console.log("Signed in as:", userInfo.email);
+      userEmail = userInfo.email;
 
       await gapi.client.load('drive', 'v3');
       const foundFolder = await findFolderByName('Expense Tracker');
@@ -256,6 +270,9 @@
               `✅ Sheet Found: <a href="${sheet.webViewLink}" target="_blank">${sheet.webViewLink}</a>`;
             document.getElementById('expense-form').style.display = 'block';
             document.getElementById('expense-summary').style.display = 'block';
+            document.getElementById('sign-in').style.display = 'none';
+            document.getElementById('sign-out').style.display = 'inline-block';
+            document.getElementById('email-section').style.display = 'block';
             sheetID1 = sheet.id;
             break;
           }
@@ -431,6 +448,8 @@
           `✅ Sheet Created, Data Added & Formatted: <a href="${sheetUrl}" target="_blank">${sheetUrl}</a>`;
       document.getElementById('expense-form').style.display = 'block';
       document.getElementById('expense-summary').style.display = 'block';
+      document.getElementById('sign-in').style.display = 'none';
+      document.getElementById('sign-out').style.display = 'inline-block';
       sheetID1 = spreadsheetId;
     }
 
@@ -455,12 +474,135 @@
           }
         }
       }, 200);
+
+      const monthDateInput = document.getElementById("month-date");
+
+      const today = new Date();
+      const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1); 
+
+      const formatted = lastMonth.toLocaleDateString("en-CA"); 
+      
+      monthDateInput.value = formatted;
     };
 
     function logout() {
       localStorage.removeItem("access_token");
       location.reload();
     }
+
+
+    async function sendEmail(to, subject, message) {
+      const email = [
+        `To: ${to}`,
+        `Subject: ${subject}`,
+        'Content-Type: text/plain; charset="UTF-8"',
+        'MIME-Version: 1.0',
+        '',
+        message
+      ].join('\n');
+
+      const base64EncodedEmail = btoa(email).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+      try {
+        await gapi.client.load('gmail', 'v1');
+
+        await gapi.client.gmail.users.messages.send({
+          userId: 'me',
+          resource: {
+            raw: base64EncodedEmail
+          }
+        });
+        alert("Email sent!");
+      } catch (error) {
+        console.error("ERROR:", error);
+        alert("Email send failed.");
+      }
+    }
+
+    async function sendMonthlyReport() {
+      const pickedDate = document.getElementById("month-date").value;
+      const recipient = document.getElementById("recipient-email").value;
+
+      if (!pickedDate) return alert("Please select a date.");
+      if (!recipient) return alert("Please enter the recipient's email.");
+
+      const date = new Date(pickedDate);
+      const year = date.getFullYear();
+      const month = date.getMonth();
+
+      const start = new Date(year, month, 1);
+      const end = new Date(year, month + 1, 0); 
+
+      const response = await gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: sheetID1,
+        range: "Sheet1!B3:F",
+      });
+
+      const rows = response.result.values || [];
+
+      let totals = {};
+      let breakdown = {};
+
+      currencies.forEach(currency => {
+        totals[currency] = 0;
+        breakdown[currency] = {};
+        categories.forEach(category => {
+          breakdown[currency][category] = 0;
+        });
+      });
+
+      for (const row of rows) {
+        const [dateStr, , category, currency, amount] = row;
+        const rowDate = new Date(dateStr);
+        const numericAmount = parseFloat(amount);
+
+        if (isNaN(rowDate.getTime()) || isNaN(numericAmount)) continue;
+        if (rowDate < start || rowDate > end) continue;
+
+        if (!totals.hasOwnProperty(currency)) { //initializes new currencies, set to 0
+          totals[currency] = 0;
+          breakdown[currency] = {};
+          categories.forEach(cat => {
+            breakdown[currency][cat] = 0;
+          });
+        }
+
+        if (!breakdown[currency].hasOwnProperty(category)) { //initializes new categories, set to 0
+          breakdown[currency][category] = 0;
+        }
+
+        totals[currency] += numericAmount;
+        breakdown[currency][category] += numericAmount;
+      }
+
+      
+      const monthStr = pickedDate.slice(0, 7); 
+      let message = `Laporan Pengeluaran Bulan ${monthStr}:\n\n`;
+
+      for (const currency of currencies) {
+        message += `${currency}.....${totals[currency].toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}\n`;
+
+        for (const category of categories) {
+          const amount = breakdown[currency][category] || 0;
+          message += `     ${category}.....${amount.toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}\n`;
+        }
+
+        message += `\n`;
+      }
+
+      const subject = `Laporan Pengeluaran ${userEmail} Bulan ${monthStr}`;
+      console.log("Email subject:", subject);
+      console.log("Email body:\n", message);
+
+      await sendEmail(recipient, subject, message);
+    }
+
 
 
   </script>
